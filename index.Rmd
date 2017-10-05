@@ -17,19 +17,39 @@ knitr::opts_chunk$set(echo = FALSE)
 
 library(dplyr)
 library(DT)
+library(ecosscraper)
 library(ESAListings)
 library(highcharter)
 library(leaflet)
 library(plotly)
+library(RPostgreSQL)
+library(secret)
 library(shinyBS)
 library(shinydashboard)
 library(treemap)
 library(viridis)
 
+con <- dbConnect(
+  dbDriver("PostgreSQL"),
+  dbname = "postgres",
+  user = ESC_DB_USR,
+  password = get_secret(ESC_DB_PW, key = priv_key, vault),
+  host = ESC_DB
+)
+
+TECP_table <- dbSendQuery(con, "select * from tecp_table") %>% dbFetch()
+TECP_data <- dplyr::filter(TECP_table, u_s_or_foreign_listed != "Foreign")
+
+col_names <- c("Scientific_Name", "Common_Name", "Species_Code",  
+               "Critical_Habitat", "First_Listed", "Species_Group",
+               "Lead_Region", "Federal_Listing_Status", "Special_Rules",
+               "US_or_Foreign", "Where_Listed", "Species_Page")
+names(TECP_data) <- col_names
+
 load("data/county_topo.rda")
 load("data/esacounties.rda")
-load("data/TECP_data.rda")
-load("data/TECP_domestic.rda")
+# load("data/TECP_data.rda")
+# load("data/TECP_domestic.rda")
 load("data/county_attrib.rda")
 
 counties <- readRDS("data/counties_df.rds")
@@ -58,20 +78,20 @@ palfx <- colorNumeric(
 
 ```{r en_th_can_prop, echo=FALSE}
 # This needs to run each app start-up because the TECP data should scrape nightly
-num_es <- nrow(filter(TECP_domestic, Federal_Listing_Status == "Endangered"))
-num_th <- nrow(filter(TECP_domestic, Federal_Listing_Status == "Threatened"))
+num_es <- nrow(filter(TECP_data, Federal_Listing_Status == "Endangered"))
+num_th <- nrow(filter(TECP_data, Federal_Listing_Status == "Threatened"))
 num_pr <- nrow(
   filter(
-    TECP_domestic,
+    TECP_data,
     startsWith(Federal_Listing_Status, "Proposed")
   )
 )
-num_cn <- nrow(filter(TECP_domestic, Federal_Listing_Status == "Candidate"))
+num_cn <- nrow(filter(TECP_data, Federal_Listing_Status == "Candidate"))
 
 ##############################################################################
 # create 'regions' dataframe
 regions <- group_by(
-  TECP_domestic,
+  TECP_data,
   Lead_Region,
   Species_Group,
   Federal_Listing_Status
@@ -107,7 +127,7 @@ regions$Lead_Region[regions$Lead_Region != "NMFS"] <-
 
 ##############################################################################
 # create 'years' dataframe
-years <- mutate(TECP_date, Year = substr(First_Listed, 9, 12)) %>%
+years <- mutate(TECP_data, Year = substr(First_Listed, 9, 12)) %>%
   select(Year, Federal_Listing_Status) %>%
   filter(Federal_Listing_Status == "Endangered" |
          Federal_Listing_Status == "Threatened")
@@ -222,7 +242,7 @@ fluidRow(
 
 ----
 
-<p style='font-size:0.92em'>Since 1973, over 2,000 species have been listed as 'Threatened' or 'Endangered' under the Endangered Species Act (ESA). The Fish and Wildlife Service (FWS) provides a detailed description of the listing process. Here you can explore the number of domestic listed species by year as of 06/16/2017.</p>
+<p style='font-size:0.92em'>Since 1973, over 2,000 species have been listed as 'Threatened' or 'Endangered' under the Endangered Species Act (ESA). The Fish and Wildlife Service (FWS) provides a detailed description of the listing process. Here you can explore the number of domestic listed species by year as of `r Sys.Date()`.</p>
 
 Column {data-width=800}
 -----------------------------------------------------------------------
@@ -756,7 +776,7 @@ Similarly, most counties have few ESA-listed species, although this distribution
 # 
 #   output$rngTble <- DT::renderDataTable({
 #     filter(ungroup(species), count == sp_count) %>%
-#       inner_join(TECP_domestic, by = c("Scientific" = "Scientific_Name")) %>%
+#       inner_join(TECP_data, by = c("Scientific" = "Scientific_Name")) %>%
 #       select(Scientific, Common_Name, count) %>%
 #       datatable(rownames = FALSE,
 #                 selection = "none",
